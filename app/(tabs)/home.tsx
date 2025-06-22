@@ -1,44 +1,111 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, StatusBar, Modal, TouchableWithoutFeedback, Keyboard, Animated, Dimensions, PanResponder } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StatusBar, Modal, TouchableWithoutFeedback, Keyboard, Animated, Dimensions, PanResponder } from 'react-native';
 import React, { useState, useRef, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import styles from '@/styles/home';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+const CATEGORIES = {
+  'body&health': { name: 'Body & Health', color: '#e74c3c', emoji: '💪' },
+  'mind&focus': { name: 'Mind & Focus', color: '#9b59b6', emoji: '🧠' },
+  'career': { name: 'Career', color: '#3498db', emoji: '💼' },
+  'financial': { name: 'Financial', color: '#f39c12', emoji: '💰' },
+  'relationships': { name: 'Relationships', color: '#f39c12', emoji: '❤️' },
+  'legacy': { name: 'Legacy', color: '#8e44ad', emoji: '🌟' },
+};
+
+type CategoryKey = keyof typeof CATEGORIES;
+
 export default function Home() {
-  const [tasks, setTasks] = useState([
-    { id: 1, mindDump: 'Feeling motivated today! Ready to tackle anything 💪', goal: 'Complete the app design', completed: false },
-    { id: 2, mindDump: 'Need to focus more on deep work', goal: 'Read for 30 minutes', completed: false },
-    { id: 3, mindDump: 'Coffee tastes extra good this morning ☕', goal: 'Call mom and catch up', completed: false },
-    { id: 4, mindDump: 'Watched an inspiring documentary last night', goal: 'Go for a 20-minute walk', completed: false },
-    { id: 5, mindDump: 'Feeling a bit overwhelmed with tasks', goal: 'Organize my workspace', completed: false },
-    { id: 6, mindDump: 'Had a great conversation with a friend', goal: 'Practice guitar for 15 minutes', completed: false },
-    { id: 7, mindDump: 'Weather is perfect today! 🌞', goal: 'Write in journal', completed: false },
-    { id: 8, mindDump: 'Learning something new always excites me', goal: 'Cook a healthy dinner', completed: false },
-    { id: 9, mindDump: 'Grateful for small moments of peace', goal: 'Meditate for 10 minutes', completed: false },
-    { id: 10, mindDump: 'Thinking about future goals and dreams', goal: 'Plan weekend activities', completed: false },
-    // Some completed tasks for history
-    { id: 11, mindDump: 'Morning energy is the best!', goal: 'Morning workout routine', completed: true, completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000) },
-    { id: 12, mindDump: 'Need to stay hydrated', goal: 'Drink 8 glasses of water', completed: true, completedAt: new Date(Date.now() - 4 * 60 * 60 * 1000) },
-    { id: 13, mindDump: 'Feeling creative today', goal: 'Sketch for 20 minutes', completed: true, completedAt: new Date(Date.now() - 6 * 60 * 60 * 1000) },
-    { id: 14, mindDump: 'Great morning coffee', goal: 'Plan the day ahead', completed: true, completedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) },
-    { id: 15, mindDump: 'Inspired by a good book', goal: 'Take notes on chapter 3', completed: true, completedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
-  ]);
-  
+  const [tasks, setTasks] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [mindDump, setMindDump] = useState('');
   const [todayGoal, setTodayGoal] = useState('');
-  
-  // Tab state - 0 = Tasks, 1 = Tips, 2 = History
   const [activeTab, setActiveTab] = useState(0);
   const tabAnimation = useRef(new Animated.Value(0)).current;
-
-  // Animation values for the expanding circle
   const expansionScale = useRef(new Animated.Value(0)).current;
   const expansionOpacity = useRef(new Animated.Value(0)).current;
 
   const incompleteTasks = tasks.filter(task => !task.completed);
   const completedTasks = tasks.filter(task => task.completed).sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
   const allTasksCompleted = incompleteTasks.length === 0 && tasks.length > 0;
+
+  const getCategoryFromGoal = (text: string): CategoryKey => {
+    const lowerText = text.toLowerCase();
+    if (lowerText.includes('health') || lowerText.includes('fitness') || lowerText.includes('exercise') || lowerText.includes('diet')) {
+      return 'body&health';
+    }
+    if (lowerText.includes('learn') || lowerText.includes('study') || lowerText.includes('read') || lowerText.includes('focus')) {
+      return 'mind&focus';
+    }
+    if (lowerText.includes('work') || lowerText.includes('career') || lowerText.includes('job') || lowerText.includes('business')) {
+      return 'career';
+    }
+    if (lowerText.includes('money') || lowerText.includes('budget') || lowerText.includes('save') || lowerText.includes('invest')) {
+      return 'financial';
+    }
+    if (lowerText.includes('family') || lowerText.includes('friend') || lowerText.includes('relationship') || lowerText.includes('love')) {
+      return 'relationships';
+    }
+    if (lowerText.includes('legacy') || lowerText.includes('impact') || lowerText.includes('contribute') || lowerText.includes('give back')) {
+      return 'legacy';
+    }
+    return 'mind&focus';
+  };
+
+  // Helper function to get category color safely
+  const getCategoryColor = (category: string): string => {
+    if (category && CATEGORIES[category]) {
+      return CATEGORIES[category].color;
+    }
+    return CATEGORIES['mind&focus'].color; // Default fallback color
+  };
+
+  // Load tasks from AsyncStorage
+  useEffect(() => {
+    const loadTasks = async () => {
+      try {
+        const storedTasks = await AsyncStorage.getItem('@tasks');
+        console.log('Home: Loaded tasks from AsyncStorage:', storedTasks);
+        if (storedTasks) {
+          const parsedTasks = JSON.parse(storedTasks);
+          if (Array.isArray(parsedTasks)) {
+            setTasks(parsedTasks.map(task => ({
+              ...task,
+              completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+              category: task.category || getCategoryFromGoal(task.goal || task.mindDump || ''),
+            })));
+          } else {
+            console.warn('Home: Stored tasks are not an array, initializing empty');
+            setTasks([]);
+          }
+        } else {
+          console.log('Home: No tasks found in AsyncStorage, initializing empty');
+          setTasks([]);
+        }
+      } catch (error) {
+        console.error('Home: Error loading tasks from AsyncStorage:', error);
+        setTasks([]);
+      }
+    };
+    loadTasks();
+  }, []);
+
+  // Save tasks to AsyncStorage
+  useEffect(() => {
+    const saveTasks = async () => {
+      try {
+        console.log('Home: Saving tasks to AsyncStorage:', tasks);
+        await AsyncStorage.setItem('@tasks', JSON.stringify(tasks));
+        console.log('Home: Tasks saved successfully');
+      } catch (error) {
+        console.error('Home: Error saving tasks to AsyncStorage:', error);
+      }
+    };
+    if (tasks.length > 0) {
+      saveTasks();
+    }
+  }, [tasks]);
 
   // Trigger animation when all tasks are completed
   useEffect(() => {
@@ -61,7 +128,6 @@ export default function Home() {
     }
   }, [allTasksCompleted]);
 
-  // Tab switching animation
   const switchTab = (tabIndex) => {
     setActiveTab(tabIndex);
     Animated.spring(tabAnimation, {
@@ -75,16 +141,16 @@ export default function Home() {
   const handleAddTask = () => {
     if (mindDump.trim() || todayGoal.trim()) {
       const newTask = {
-        id: Date.now(),
+        id: Date.now() + Math.random(), // Ensure unique ID
         mindDump: mindDump,
         goal: todayGoal,
         completed: false,
+        category: getCategoryFromGoal(todayGoal || mindDump || ''),
       };
       setTasks([...tasks, newTask]);
       setMindDump('');
       setTodayGoal('');
       setShowAddModal(false);
-      // Switch to tasks tab when adding new task
       if (activeTab !== 0) {
         switchTab(0);
       }
@@ -101,20 +167,15 @@ export default function Home() {
     setTasks(tasks.filter(task => task.id !== id));
   };
 
-  // Helper function to format time ago
   const getTimeAgo = (date) => {
     const now = new Date();
     const diffInMinutes = Math.floor((now - new Date(date)) / (1000 * 60));
-    
     if (diffInMinutes < 1) return 'Just now';
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    
     const diffInHours = Math.floor(diffInMinutes / 60);
     if (diffInHours < 24) return `${diffInHours}h ago`;
-    
     const diffInDays = Math.floor(diffInHours / 24);
     if (diffInDays < 7) return `${diffInDays}d ago`;
-    
     return new Date(date).toLocaleDateString();
   };
 
@@ -123,7 +184,6 @@ export default function Home() {
     setShowAddModal(false);
   };
 
-  // Generate consistent rotation and position for each card based on task ID
   const getCardStyle = (index, total, taskId) => {
     const seed = taskId % 1000;
     const rotation = ((seed * 0.1234) % 1 - 0.5) * 15;
@@ -131,7 +191,6 @@ export default function Home() {
     const translateY = ((seed * 0.9012) % 1 - 0.5) * 15;
     const scale = 1 - (index * 0.015);
     const zIndex = total - index;
-    
     return {
       transform: [
         { rotate: `${rotation}deg` },
@@ -174,14 +233,11 @@ export default function Home() {
       },
       onPanResponderRelease: (evt, gestureState) => {
         if (isRemoving) return;
-        
         const swipeThreshold = screenWidth * 0.25;
         const velocity = Math.abs(gestureState.vx);
-        
         if (Math.abs(gestureState.dx) > swipeThreshold || velocity > 0.5) {
           setIsRemoving(true);
           const direction = gestureState.dx > 0 ? 1 : -1;
-          
           Animated.parallel([
             Animated.timing(pan, {
               toValue: { x: direction * screenWidth * 1.2, y: gestureState.dy * 0.5 },
@@ -256,7 +312,6 @@ export default function Home() {
             <Text style={styles.deleteText}>🗑️</Text>
           </TouchableOpacity>
         </View>
-        
         {task.mindDump ? (
           <View style={styles.taskSection}>
             <Text style={styles.taskLabel}>💭 Mind:</Text>
@@ -265,7 +320,6 @@ export default function Home() {
             </Text>
           </View>
         ) : null}
-        
         {task.goal ? (
           <View style={styles.taskSection}>
             <Text style={styles.taskLabel}>🎯 Goal:</Text>
@@ -278,7 +332,6 @@ export default function Home() {
     );
   };
 
-  // Group completed tasks by date
   const groupTasksByDate = (tasks) => {
     const groups = {};
     tasks.forEach(task => {
@@ -286,7 +339,6 @@ export default function Home() {
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
-      
       let dateKey;
       if (date.toDateString() === today.toDateString()) {
         dateKey = 'Today';
@@ -299,19 +351,16 @@ export default function Home() {
           day: 'numeric' 
         });
       }
-      
       if (!groups[dateKey]) {
         groups[dateKey] = [];
       }
       groups[dateKey].push(task);
     });
-    
     return groups;
   };
 
   const groupedTasks = groupTasksByDate(completedTasks);
 
-  // Calculate completion stats for tips
   const todayCompleted = completedTasks.filter(task => {
     const today = new Date();
     const taskDate = new Date(task.completedAt);
@@ -324,11 +373,9 @@ export default function Home() {
     return new Date(task.completedAt) >= weekAgo;
   }).length;
 
-  // Calculate the size needed to cover the entire screen from center
   const maxDimension = Math.max(screenWidth, screenHeight);
   const circleSize = maxDimension * 2;
 
-  // Tips data
   const tips = [
     {
       icon: '🧠',
@@ -365,8 +412,6 @@ export default function Home() {
   return (
     <View style={[styles.container, allTasksCompleted && styles.completedContainer]}>
       <StatusBar barStyle="light-content" backgroundColor={allTasksCompleted ? "#27ae60" : "#6c5ce7"} />
-      
-      {/* Animated expanding circle overlay */}
       <Animated.View
         style={[
           styles.expandingCircle,
@@ -389,7 +434,6 @@ export default function Home() {
         ]}
         pointerEvents="none"
       />
-      
       <View style={[styles.header, allTasksCompleted && styles.completedHeader]}>
         <Text style={styles.welcomeText}>Daily Focus ✨</Text>
         <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { 
@@ -397,8 +441,6 @@ export default function Home() {
           month: 'long', 
           day: 'numeric' 
         })}</Text>
-        
-        {/* Tab Navigation */}
         <View style={styles.tabContainer}>
           <TouchableOpacity 
             style={[styles.tab, activeTab === 0 && styles.activeTab]}
@@ -439,8 +481,6 @@ export default function Home() {
           />
         </View>
       </View>
-
-      {/* Content Container with Smooth Transitions */}
       <View style={styles.contentContainer}>
         <Animated.View
           style={[
@@ -455,19 +495,18 @@ export default function Home() {
             }
           ]}
         >
-          {/* Tasks Tab */}
           <View style={styles.tabPanel}>
             <View style={styles.fixedCardStack}>
               {incompleteTasks.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyStateText}>🎉</Text>
-                  <Text style={styles.emptyStateTitle}>All Done!</Text>
-                  <Text style={styles.emptyStateSubtitle}>You've completed all your tasks. Great job!</Text>
+                  <Text style={styles.emptyStateTitle}>No Tasks Yet!</Text>
+                  <Text style={styles.emptyStateSubtitle}>Add a new task to get started!</Text>
                 </View>
               ) : (
                 incompleteTasks.map((task, index) => (
                   <SwipeableCard
-                    key={task.id}
+                    key={`incomplete-${task.id}-${index}`}
                     task={task}
                     index={index}
                     total={incompleteTasks.length}
@@ -478,8 +517,6 @@ export default function Home() {
               )}
             </View>
           </View>
-
-          {/* Tips Tab */}
           <View style={styles.tabPanel}>
             <ScrollView style={styles.tipsScrollView} showsVerticalScrollIndicator={false}>
               <View style={styles.statsContainer}>
@@ -496,9 +533,7 @@ export default function Home() {
                   <Text style={styles.statLabel}>Remaining</Text>
                 </View>
               </View>
-              
               <Text style={styles.tipsTitle}>💡 Productivity Tips</Text>
-              
               {tips.map((tip, index) => (
                 <View key={index} style={styles.tipCard}>
                   <View style={styles.tipHeader}>
@@ -511,8 +546,6 @@ export default function Home() {
               <View style={{ height: 100 }} />
             </ScrollView>
           </View>
-
-          {/* History Tab */}
           <View style={styles.tabPanel}>
             <ScrollView style={styles.historyScrollView} showsVerticalScrollIndicator={false}>
               {completedTasks.length === 0 ? (
@@ -526,21 +559,19 @@ export default function Home() {
                   <View key={dateKey} style={styles.historyGroup}>
                     <Text style={styles.historyGroupTitle}>{dateKey}</Text>
                     {tasks.map((task, index) => (
-                      <View key={task.id} style={styles.historyCard}>
+                      <View key={`completed-${task.id}-${index}`} style={styles.historyCard}>
                         <View style={styles.historyCardHeader}>
-                          <View style={styles.completedBadge}>
+                          <View style={[styles.completedBadge, { backgroundColor: getCategoryColor(task.category) }]}>
                             <Text style={styles.completedBadgeText}>✓</Text>
                           </View>
                           <Text style={styles.completedTime}>{getTimeAgo(task.completedAt)}</Text>
                         </View>
-                        
                         {task.goal && (
                           <View style={styles.historyItem}>
                             <Text style={styles.historyLabel}>🎯</Text>
                             <Text style={styles.historyText}>{task.goal}</Text>
                           </View>
                         )}
-                        
                         {task.mindDump && (
                           <View style={styles.historyItem}>
                             <Text style={styles.historyLabel}>💭</Text>
@@ -557,7 +588,6 @@ export default function Home() {
           </View>
         </Animated.View>
       </View>
-
       <TouchableOpacity 
         style={[styles.addButton, allTasksCompleted && styles.completedAddButton]} 
         onPress={() => setShowAddModal(true)}
@@ -566,7 +596,6 @@ export default function Home() {
           + Add New
         </Text>
       </TouchableOpacity>
-
       <Modal
         animationType="slide"
         transparent={true}
@@ -578,9 +607,7 @@ export default function Home() {
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.bottomSheet}>
                 <View style={styles.bottomSheetHandle} />
-                
                 <Text style={styles.modalTitle}>✨ New Entry</Text>
-                
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>💭 What's in your mind?</Text>
                   <TextInput
@@ -596,7 +623,6 @@ export default function Home() {
                     blurOnSubmit={false}
                   />
                 </View>
-
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>🎯 What do you want to do?</Text>
                   <TextInput
@@ -609,7 +635,6 @@ export default function Home() {
                     returnKeyType="done"
                   />
                 </View>
-
                 <View style={styles.modalButtons}>
                   <TouchableOpacity 
                     style={styles.cancelButton} 
@@ -617,7 +642,6 @@ export default function Home() {
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                  
                   <TouchableOpacity style={styles.saveButton} onPress={handleAddTask}>
                     <Text style={styles.saveButtonText}>🚀 Save</Text>
                   </TouchableOpacity>

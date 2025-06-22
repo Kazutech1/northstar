@@ -1,76 +1,166 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, Modal, TextInput, TouchableWithoutFeedback, Keyboard } from 'react-native'
-import React, { useState } from 'react'
-import { Ionicons } from '@expo/vector-icons'
-import { useRouter } from 'expo-router'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, Modal, TextInput, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+interface Goal {
+  id: number;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+  completedAt?: Date;
+}
 
 export default function Relationships() {
   const router = useRouter();
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [newGoal, setNewGoal] = useState('')
-  const [goals, setGoals] = useState([
-    // Example goals - remove these in production
-    { id: 1, text: 'Reconnect with old friends monthly', completed: false, createdAt: new Date() },
-    { id: 2, text: 'Have weekly date nights with partner', completed: true, createdAt: new Date() },
-    { id: 3, text: 'Call family members more often', completed: false, createdAt: new Date() },
-    { id: 4, text: 'Make 3 new meaningful friendships', completed: false, createdAt: new Date() },
-  ])
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newGoal, setNewGoal] = useState('');
+  const [goals, setGoals] = useState<Goal[]>([]);
 
   const sectionInfo = {
     title: 'Relationships & Connections',
     emoji: '💕',
     description: 'Building meaningful connections and nurturing relationships',
-    color: '#e74c3c'
-  }
+    color: '#e74c3c',
+  };
+
+  // Load goals from AsyncStorage
+  const loadGoals = async () => {
+    try {
+      const storedGoals = await AsyncStorage.getItem('@relationship_goals');
+      const relationshipGoals = storedGoals
+        ? JSON.parse(storedGoals).map((g: any) => ({
+            ...g,
+            createdAt: new Date(g.createdAt),
+            completedAt: g.completedAt ? new Date(g.completedAt) : undefined,
+          }))
+        : [];
+      setGoals(relationshipGoals);
+      console.log('Relationships: Loaded relationship goals:', relationshipGoals);
+
+      // Sync with @tasks for LogDashboard
+      const storedTasks = await AsyncStorage.getItem('@tasks');
+      let tasks = storedTasks ? JSON.parse(storedTasks) : [];
+      const otherTasks = tasks.filter((t: any) => t.category !== 'relationships');
+      const relationshipTasks = relationshipGoals.map((goal: Goal) => ({
+        id: goal.id,
+        mindDump: '',
+        goal: goal.text,
+        completed: goal.completed,
+        completedAt: goal.completedAt ? goal.completedAt.toISOString() : undefined,
+        category: 'relationships',
+        createdAt: goal.createdAt.toISOString(),
+      }));
+      tasks = [...otherTasks, ...relationshipTasks];
+      await AsyncStorage.setItem('@tasks', JSON.stringify(tasks));
+      console.log('Relationships: Synced tasks:', tasks);
+    } catch (error) {
+      console.error('Relationships: Error loading goals:', error);
+      setGoals([]);
+    }
+  };
+
+  // Save goals to AsyncStorage
+  const saveGoals = async (updatedGoals: Goal[]) => {
+    try {
+      // Save to @relationship_goals
+      const serializedGoals = updatedGoals.map(goal => ({
+        ...goal,
+        createdAt: goal.createdAt.toISOString(),
+        completedAt: goal.completedAt ? goal.completedAt.toISOString() : undefined,
+      }));
+      await AsyncStorage.setItem('@relationship_goals', JSON.stringify(serializedGoals));
+      console.log('Relationships: Saved relationship goals:', serializedGoals);
+
+      // Sync with @tasks
+      const storedTasks = await AsyncStorage.getItem('@tasks');
+      let tasks = storedTasks ? JSON.parse(storedTasks) : [];
+      const otherTasks = tasks.filter((t: any) => t.category !== 'relationships');
+      const relationshipTasks = updatedGoals.map(goal => ({
+        id: goal.id,
+        mindDump: '',
+        goal: goal.text,
+        completed: goal.completed,
+        completedAt: goal.completedAt ? goal.completedAt.toISOString() : undefined,
+        category: 'relationships',
+        createdAt: goal.createdAt.toISOString(),
+      }));
+      tasks = [...otherTasks, ...relationshipTasks];
+      await AsyncStorage.setItem('@tasks', JSON.stringify(tasks));
+      console.log('Relationships: Saved tasks:', tasks);
+    } catch (error) {
+      console.error('Relationships: Error saving goals:', error);
+    }
+  };
+
+  // Reload goals when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      loadGoals();
+    }, [])
+  );
 
   const handleAddGoal = () => {
     if (newGoal.trim()) {
-      setGoals(prev => [...prev, {
+      const newGoalObj: Goal = {
         id: Date.now(),
         text: newGoal,
         completed: false,
-        createdAt: new Date()
-      }])
-      setNewGoal('')
-      setShowAddModal(false)
+        createdAt: new Date(),
+      };
+      const updatedGoals = [...goals, newGoalObj];
+      setGoals(updatedGoals);
+      saveGoals(updatedGoals);
+      setNewGoal('');
+      setShowAddModal(false);
     }
-  }
+  };
 
-  const toggleGoalComplete = (goalId) => {
-    setGoals(prev => 
-      prev.map(goal => 
-        goal.id === goalId ? { ...goal, completed: !goal.completed } : goal
-      )
-    )
-  }
+  const toggleGoalComplete = (goalId: number) => {
+    const updatedGoals = goals.map(goal =>
+      goal.id === goalId
+        ? {
+            ...goal,
+            completed: !goal.completed,
+            completedAt: !goal.completed ? new Date() : undefined,
+          }
+        : goal
+    );
+    setGoals(updatedGoals);
+    saveGoals(updatedGoals);
+  };
 
-  const deleteGoal = (goalId) => {
-    setGoals(prev => prev.filter(goal => goal.id !== goalId))
-  }
+  const deleteGoal = (goalId: number) => {
+    const updatedGoals = goals.filter(goal => goal.id !== goalId);
+    setGoals(updatedGoals);
+    saveGoals(updatedGoals);
+  };
 
   const closeModal = () => {
-    Keyboard.dismiss()
-    setShowAddModal(false)
-    setNewGoal('')
-  }
+    Keyboard.dismiss();
+    setShowAddModal(false);
+    setNewGoal('');
+  };
 
-  const completedCount = goals.filter(g => g.completed).length
-  const progressPercentage = goals.length > 0 ? (completedCount / goals.length) * 100 : 0
+  const completedCount = goals.filter(g => g.completed).length;
+  const progressPercentage = goals.length > 0 ? (completedCount / goals.length) * 100 : 0;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={sectionInfo.color} />
-      
+
       {/* Header */}
       <View style={[styles.header, { backgroundColor: sectionInfo.color }]}>
         <View style={styles.headerTop}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
           >
             <Ionicons name="arrow-back" size={24} color="#ffffff" />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.addButton}
             onPress={() => setShowAddModal(true)}
           >
@@ -82,7 +172,7 @@ export default function Relationships() {
           <Text style={styles.headerEmoji}>{sectionInfo.emoji}</Text>
           <Text style={styles.headerTitle}>{sectionInfo.title}</Text>
           <Text style={styles.headerDescription}>{sectionInfo.description}</Text>
-          
+
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{goals.length}</Text>
@@ -103,7 +193,7 @@ export default function Relationships() {
       </View>
 
       {/* Goals List */}
-      <ScrollView 
+      <ScrollView
         style={styles.scrollableContent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -115,7 +205,7 @@ export default function Relationships() {
             <Text style={styles.emptyStateDescription}>
               Start building deeper connections and nurturing the relationships that matter most to you!
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.emptyStateButton, { backgroundColor: sectionInfo.color }]}
               onPress={() => setShowAddModal(true)}
             >
@@ -126,15 +216,15 @@ export default function Relationships() {
           <View style={styles.goalsList}>
             {goals.map((goal) => (
               <View key={goal.id} style={styles.goalCard}>
-                <TouchableOpacity 
-                  style={[styles.goalCheckbox, goal.completed && styles.goalCheckboxCompleted]}
+                <TouchableOpacity
+                  style={[styles.goalCheckbox, goal.completed && { backgroundColor: sectionInfo.color, borderColor: sectionInfo.color }]}
                   onPress={() => toggleGoalComplete(goal.id)}
                 >
                   {goal.completed && (
                     <Ionicons name="heart" size={14} color="#ffffff" />
                   )}
                 </TouchableOpacity>
-                
+
                 <View style={styles.goalContent}>
                   <Text style={[styles.goalText, goal.completed && styles.goalTextCompleted]}>
                     {goal.text}
@@ -143,8 +233,8 @@ export default function Relationships() {
                     Added {goal.createdAt.toLocaleDateString()}
                   </Text>
                 </View>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
                   style={styles.deleteGoalButton}
                   onPress={() => deleteGoal(goal.id)}
                 >
@@ -152,41 +242,6 @@ export default function Relationships() {
                 </TouchableOpacity>
               </View>
             ))}
-          </View>
-        )}
-
-        {/* Relationship Tips Section */}
-        {goals.length > 0 && (
-          <View style={styles.tipsSection}>
-            <Text style={styles.tipsTitle}>💡 Relationship Building Tips</Text>
-            <View style={styles.tipCard}>
-              <Text style={styles.tipEmoji}>🎯</Text>
-              <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Quality over Quantity</Text>
-                <Text style={styles.tipDescription}>Focus on deepening existing relationships rather than constantly seeking new ones</Text>
-              </View>
-            </View>
-            <View style={styles.tipCard}>
-              <Text style={styles.tipEmoji}>💬</Text>
-              <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Active Listening</Text>
-                <Text style={styles.tipDescription}>Give your full attention and ask thoughtful follow-up questions</Text>
-              </View>
-            </View>
-            <View style={styles.tipCard}>
-              <Text style={styles.tipEmoji}>🕐</Text>
-              <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Consistent Connection</Text>
-                <Text style={styles.tipDescription}>Regular small gestures matter more than occasional grand ones</Text>
-              </View>
-            </View>
-            <View style={styles.tipCard}>
-              <Text style={styles.tipEmoji}>🎁</Text>
-              <View style={styles.tipContent}>
-                <Text style={styles.tipTitle}>Show Appreciation</Text>
-                <Text style={styles.tipDescription}>Express gratitude and acknowledge the value others bring to your life</Text>
-              </View>
-            </View>
           </View>
         )}
 
@@ -202,86 +257,90 @@ export default function Relationships() {
       >
         <TouchableWithoutFeedback onPress={closeModal}>
           <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
+            <TouchableWithoutFeedback>
               <View style={styles.bottomSheet}>
                 <View style={styles.bottomSheetHandle} />
-                
-                <Text style={[styles.modalTitle, { color: sectionInfo.color }]}>
-                  {sectionInfo.emoji} New Relationship Goal
-                </Text>
-                
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>❤️ How do you want to improve your relationships?</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    placeholder="e.g., Spend more quality time with family, Meet new people, Improve communication skills, Plan regular date nights..."
-                    placeholderTextColor="#bdc3c7"
-                    multiline={true}
-                    numberOfLines={4}
-                    value={newGoal}
-                    onChangeText={setNewGoal}
-                    textAlignVertical="top"
-                    autoCorrect={true}
-                    blurOnSubmit={false}
-                  />
-                </View>
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.modalScrollContent}
+                >
+                  <Text style={[styles.modalTitle, { color: sectionInfo.color }]}>
+                    {sectionInfo.emoji} New Relationship Goal
+                  </Text>
 
-                <View style={styles.quickSuggestions}>
-                  <Text style={styles.suggestionsTitle}>💭 Quick Ideas:</Text>
-                  <View style={styles.suggestionsContainer}>
-                    {[
-                      'Weekly family dinners',
-                      'Monthly friend meetups',
-                      'Daily check-ins with partner',
-                      'Join social groups',
-                      'Improve communication',
-                      'Plan surprise gestures',
-                      'Host gatherings',
-                      'Send thoughtful messages'
-                    ].map((suggestion, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={[styles.suggestionChip, { backgroundColor: sectionInfo.color }]}
-                        onPress={() => setNewGoal(suggestion)}
-                      >
-                        <Text style={styles.suggestionText}>{suggestion}</Text>
-                      </TouchableOpacity>
-                    ))}
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>❤️ How do you want to improve your relationships?</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      placeholder="e.g., Spend more quality time with family, Meet new people, Improve communication skills, Plan regular date nights..."
+                      placeholderTextColor="#bdc3c7"
+                      multiline={true}
+                      numberOfLines={4}
+                      value={newGoal}
+                      onChangeText={setNewGoal}
+                      textAlignVertical="top"
+                      autoCorrect={true}
+                      blurOnSubmit={false}
+                    />
                   </View>
-                </View>
 
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity 
-                    style={styles.cancelButton} 
-                    onPress={closeModal}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.saveButton, { backgroundColor: sectionInfo.color }]} 
-                    onPress={handleAddGoal}
-                  >
-                    <Text style={styles.saveButtonText}>💕 Add Goal</Text>
-                  </TouchableOpacity>
-                </View>
+                  <View style={styles.quickSuggestions}>
+                    <Text style={styles.suggestionsTitle}>💭 Quick Ideas:</Text>
+                    <View style={styles.suggestionsContainer}>
+                      {[
+                        'Weekly family dinners',
+                        'Monthly friend meetups',
+                        'Daily check-ins with partner',
+                        'Join social groups',
+                        'Improve communication',
+                        'Plan surprise gestures',
+                        'Host gatherings',
+                        'Send thoughtful messages',
+                      ].map((suggestion, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={[styles.suggestionChip, { borderColor: sectionInfo.color }]}
+                          onPress={() => setNewGoal(suggestion)}
+                        >
+                          <Text style={[styles.suggestionText, { color: sectionInfo.color }]}>{suggestion}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.modalButtons}>
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={closeModal}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.saveButton, { backgroundColor: sectionInfo.color }]}
+                      onPress={handleAddGoal}
+                    >
+                      <Text style={styles.saveButtonText}>💕 Add Goal</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
               </View>
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#1a1a1a',
   },
   header: {
-    paddingTop: 40,
-    paddingBottom: 30,
+    paddingTop: 50,
+    paddingBottom: 20,
     paddingHorizontal: 20,
   },
   headerTop: {
@@ -300,32 +359,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerEmoji: {
-    fontSize: 48,
+    fontSize: 40,
     marginBottom: 10,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#ffffff',
-    marginBottom: 8,
-    textAlign: 'center',
+    marginBottom: 5,
   },
   headerDescription: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.9)',
-    textAlign: 'center',
+    fontSize: 14,
+    color: '#ffffff',
+    opacity: 0.8,
     marginBottom: 20,
+    textAlign: 'center',
   },
   statsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 15,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
     padding: 15,
-    alignItems: 'center',
+    width: '100%',
   },
   statItem: {
-    flex: 1,
     alignItems: 'center',
+    flex: 1,
   },
   statNumber: {
     fontSize: 20,
@@ -334,67 +394,69 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
+    color: '#ffffff',
+    opacity: 0.7,
   },
   statDivider: {
     width: 1,
-    height: 30,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    marginHorizontal: 15,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: '100%',
+    marginHorizontal: 10,
   },
   scrollableContent: {
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 50,
+    justifyContent: 'center',
+    marginTop: 50,
   },
   emptyStateEmoji: {
-    fontSize: 64,
-    marginBottom: 20,
+    fontSize: 50,
+    marginBottom: 10,
   },
   emptyStateTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#2c3e50',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ffffff',
     marginBottom: 10,
   },
   emptyStateDescription: {
-    fontSize: 16,
-    color: '#7f8c8d',
+    fontSize: 14,
+    color: '#bdc3c7',
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 30,
+    marginBottom: 20,
     paddingHorizontal: 20,
   },
   emptyStateButton: {
+    borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+    paddingHorizontal: 20,
   },
   emptyStateButtonText: {
-    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    color: '#ffffff',
   },
   goalsList: {
-    gap: 15,
+    marginTop: 10,
   },
   goalCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 15,
-    padding: 15,
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#2d2d2d',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   goalCheckbox: {
     width: 24,
@@ -402,81 +464,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: '#bdc3c7',
-    marginRight: 15,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  goalCheckboxCompleted: {
-    backgroundColor: '#e74c3c',
-    borderColor: '#e74c3c',
+    marginRight: 15,
   },
   goalContent: {
     flex: 1,
   },
   goalText: {
     fontSize: 16,
-    color: '#2c3e50',
-    lineHeight: 22,
-    marginBottom: 4,
+    fontWeight: '500',
+    color: '#ffffff',
   },
   goalTextCompleted: {
     textDecorationLine: 'line-through',
-    color: '#95a5a6',
+    color: '#bdc3c7',
   },
   goalDate: {
     fontSize: 12,
-    color: '#95a5a6',
+    color: '#bdc3c7',
+    marginTop: 4,
   },
   deleteGoalButton: {
     padding: 8,
-    marginLeft: 10,
-  },
-  tipsSection: {
-    marginTop: 30,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#ecf0f1',
-  },
-  tipsTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#2c3e50',
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  tipCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  tipEmoji: {
-    fontSize: 24,
-    marginRight: 15,
-  },
-  tipContent: {
-    flex: 1,
-  },
-  tipTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 2,
-  },
-  tipDescription: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    lineHeight: 18,
-  },
-  bottomSpacing: {
-    height: 20,
   },
   modalOverlay: {
     flex: 1,
@@ -484,13 +494,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   bottomSheet: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    paddingHorizontal: 25,
-    paddingTop: 20,
-    paddingBottom: 40,
-    maxHeight: '80%',
+    backgroundColor: '#2d2d2d',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+    maxHeight: '90%',
   },
   bottomSheetHandle: {
     width: 40,
@@ -498,40 +508,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#bdc3c7',
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 20,
+    marginVertical: 10,
+  },
+  modalScrollContent: {
+    paddingBottom: 20,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
+    marginBottom: 20,
     textAlign: 'center',
-    marginBottom: 25,
   },
   section: {
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#2c3e50',
+    color: '#ffffff',
     marginBottom: 10,
   },
   textInput: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#3a3a3a',
     borderRadius: 12,
-    padding: 16,
+    padding: 15,
+    color: '#ffffff',
     fontSize: 16,
-    color: '#2c3e50',
-    minHeight: 100,
-    borderWidth: 2,
-    borderColor: '#ecf0f1',
+    minHeight: 120,
   },
   quickSuggestions: {
     marginBottom: 20,
   },
   suggestionsTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#2c3e50',
+    color: '#ffffff',
     marginBottom: 10,
   },
   suggestionsContainer: {
@@ -540,44 +551,48 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   suggestionChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderWidth: 1,
     borderRadius: 20,
-    marginBottom: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginRight: 8,
+    marginBottom: 8,
   },
   suggestionText: {
-    color: '#ffffff',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '500',
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 20,
+    marginTop: 10,
+    paddingBottom: 10,
   },
   cancelButton: {
-    backgroundColor: '#ecf0f1',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    flex: 0.45,
+    flex: 1,
+    backgroundColor: '#3a3a3a',
+    borderRadius: 12,
+    padding: 15,
+    alignItems: 'center',
+    marginRight: 10,
   },
   cancelButtonText: {
-    color: '#7f8c8d',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
+    color: '#ffffff',
   },
   saveButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    flex: 0.45,
+    flex: 1,
+    borderRadius: 12,
+    padding: 15,
+    alignItems: 'center',
   },
   saveButtonText: {
-    color: '#ffffff',
     fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: '600',
+    color: '#ffffff',
   },
-})
+  bottomSpacing: {
+    height: 20,
+  },
+});

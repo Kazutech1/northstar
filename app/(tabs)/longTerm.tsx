@@ -1,52 +1,48 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, Dimensions, FlatList } from 'react-native'
-import React, { useState } from 'react'
-import { Ionicons } from '@expo/vector-icons'
-import { useRouter } from 'expo-router'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, Dimensions, FlatList } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: screenWidth } = Dimensions.get('window');
 const cardWidth = (screenWidth - 60) / 2; // 20px padding on sides + 20px gap between cards
 
+interface Goal {
+  id: number;
+  text: string;
+  completed: boolean;
+}
+
+interface GoalSection {
+  id: string;
+  title: string;
+  screenName: string;
+  icon: string;
+  description: string;
+  emoji: string;
+  gradient: string[];
+}
+
 export default function LongTerm() {
   const router = useRouter();
-  
-  const [goals, setGoals] = useState({
-    health: [
-      { id: 1, text: 'Exercise 4x per week', completed: false },
-      { id: 2, text: 'Drink 8 glasses of water daily', completed: true },
-      { id: 3, text: 'Sleep 8 hours nightly', completed: true },
-      { id: 4, text: 'Take daily vitamins', completed: false },
-    ],
-    mind: [
-      { id: 1, text: 'Read 12 books this year', completed: false },
-      { id: 2, text: 'Meditate 10 minutes daily', completed: true },
-      { id: 3, text: 'Learn Spanish', completed: false },
-      { id: 4, text: 'Complete online course', completed: true },
-      { id: 5, text: 'Journal weekly', completed: true },
-    ],
-    career: [
-      { id: 1, text: 'Get promoted to senior role', completed: false },
-      { id: 2, text: 'Complete certification', completed: true },
-      { id: 3, text: 'Attend 5 networking events', completed: false },
-    ],
-    money: [
-      { id: 1, text: 'Save $10,000 emergency fund', completed: true },
-      { id: 2, text: 'Invest in index funds', completed: false },
-      { id: 3, text: 'Pay off credit card debt', completed: true },
-      { id: 4, text: 'Create monthly budget', completed: true },
-    ],
-    relationships: [
-      { id: 1, text: 'Call family weekly', completed: true },
-      { id: 2, text: 'Plan monthly date nights', completed: false },
-      { id: 3, text: 'Reconnect with old friends', completed: true },
-    ],
-    legacy: [
-      { id: 1, text: 'Volunteer monthly', completed: false },
-      { id: 2, text: 'Mentor someone', completed: true },
-      { id: 3, text: 'Start a blog', completed: false },
-    ]
-  })
 
-  const [goalSections, setGoalSections] = useState([
+  const [goals, setGoals] = useState<{
+    health: Goal[];
+    mind: Goal[];
+    career: Goal[];
+    money: Goal[];
+    relationships: Goal[];
+    legacy: Goal[];
+  }>({
+    health: [],
+    mind: [],
+    career: [],
+    money: [],
+    relationships: [],
+    legacy: [],
+  });
+
+  const [goalSections] = useState<GoalSection[]>([
     {
       id: 'health',
       title: 'Body & Health',
@@ -54,25 +50,25 @@ export default function LongTerm() {
       icon: 'fitness-outline',
       description: 'Physical wellness',
       emoji: '💪',
-      gradient: ['#ff6b6b', '#ff8e8e']
+      gradient: ['#ff6b6b', '#ff8e8e'],
     },
     {
       id: 'mind',
-      title: 'Mind & Focus', 
+      title: 'Mind & Focus',
       screenName: 'mind',
       icon: 'bulb-outline',
       description: 'Mental clarity',
       emoji: '🧠',
-      gradient: ['#4ecdc4', '#44b3aa']
+      gradient: ['#4ecdc4', '#44b3aa'],
     },
     {
       id: 'career',
       title: 'Career',
       screenName: 'career',
-      icon: 'briefcase-outline', 
+      icon: 'briefcase-outline',
       description: 'Professional growth',
       emoji: '🚀',
-      gradient: ['#45b7d1', '#3498db']
+      gradient: ['#45b7d1', '#3498db'],
     },
     {
       id: 'money',
@@ -81,7 +77,7 @@ export default function LongTerm() {
       icon: 'card-outline',
       description: 'Wealth building',
       emoji: '💰',
-      gradient: ['#96ceb4', '#27ae60']
+      gradient: ['#f39c12', '#e67e22'],
     },
     {
       id: 'relationships',
@@ -90,7 +86,7 @@ export default function LongTerm() {
       icon: 'heart-outline',
       description: 'Connections',
       emoji: '❤️',
-      gradient: ['#feca57', '#f39c12']
+      gradient: ['#feca57', '#f39c12'],
     },
     {
       id: 'legacy',
@@ -99,24 +95,105 @@ export default function LongTerm() {
       icon: 'trophy-outline',
       description: 'Long-term impact',
       emoji: '🏆',
-      gradient: ['#a55eea', '#8e44ad']
-    }
-  ])
+      gradient: ['#a55eea', '#8e44ad'],
+    },
+  ]);
 
-  const navigateToSection = (section) => {
-    router.push(`/(long)/${section.screenName}`)
-  }
+  // Load goals from AsyncStorage
+  const loadGoals = async () => {
+    try {
+      const categories = ['health', 'mind', 'career', 'money', 'relationships', 'legacy'];
+      const updatedGoals = {
+        health: [],
+        mind: [],
+        career: [],
+        money: [],
+        relationships: [],
+        legacy: [],
+      };
+
+      // Load tasks for syncing completion
+      const storedTasks = await AsyncStorage.getItem('@tasks');
+      const tasks = storedTasks ? JSON.parse(storedTasks) : [];
+      console.log('LongTerm: Loaded tasks:', tasks);
+
+      // Load goals for each category
+      for (const category of categories) {
+        const storageKey = `@${category}_goals`;
+        const storedGoals = await AsyncStorage.getItem(storageKey);
+        let categoryGoals = [];
+
+        if (category === 'money') {
+          // Handle money goals from @money_goals
+          const moneyGoals = storedGoals
+            ? JSON.parse(storedGoals).map((g: any) => ({
+                id: g.id,
+                text: g.name,
+                completed: g.currentAmount >= g.targetAmount,
+              }))
+            : [];
+          categoryGoals = moneyGoals;
+        } else {
+          // Handle other categories
+          categoryGoals = storedGoals
+            ? JSON.parse(storedGoals).map((g: any) => ({
+                id: g.id,
+                text: g.text || g.name,
+                completed: g.completed || false,
+              }))
+            : [];
+        }
+
+        // Sync completion with tasks
+        categoryGoals = categoryGoals.map((goal: Goal) => {
+          const matchingTask = tasks.find(
+            (task: any) => task.goal.toLowerCase() === goal.text.toLowerCase() && task.category === category
+          );
+          return {
+            ...goal,
+            completed: matchingTask ? matchingTask.completed : goal.completed,
+          };
+        });
+
+        updatedGoals[category] = categoryGoals;
+      }
+
+      setGoals(updatedGoals);
+      console.log('LongTerm: Loaded goals:', updatedGoals);
+    } catch (error) {
+      console.error('LongTerm: Error loading goals:', error);
+      setGoals({
+        health: [],
+        mind: [],
+        career: [],
+        money: [],
+        relationships: [],
+        legacy: [],
+      });
+    }
+  };
+
+  // Reload goals when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      loadGoals();
+    }, [])
+  );
+
+  const navigateToSection = (section: GoalSection) => {
+    router.push(`/(long)/${section.screenName}`);
+  };
 
   // Calculate overall progress
-  const totalGoals = Object.values(goals).flat().length
-  const completedGoals = Object.values(goals).flat().filter(g => g.completed).length
-  const overallProgress = totalGoals > 0 ? (completedGoals / totalGoals) * 100 : 0
+  const totalGoals = Object.values(goals).flat().length;
+  const completedGoals = Object.values(goals).flat().filter(g => g.completed).length;
+  const overallProgress = totalGoals > 0 ? (completedGoals / totalGoals) * 100 : 0;
 
-  const renderGoalCard = ({ item }) => {
-    const sectionGoals = goals[item.id] || []
-    const completedCount = sectionGoals.filter(g => g.completed).length
-    const progressPercentage = sectionGoals.length > 0 ? (completedCount / sectionGoals.length) * 100 : 0
-    
+  const renderGoalCard = ({ item }: { item: GoalSection }) => {
+    const sectionGoals = goals[item.id] || [];
+    const completedCount = sectionGoals.filter(g => g.completed).length;
+    const progressPercentage = sectionGoals.length > 0 ? (completedCount / sectionGoals.length) * 100 : 0;
+
     return (
       <TouchableOpacity
         style={[styles.goalCard, { backgroundColor: item.gradient[0] }]}
@@ -130,21 +207,18 @@ export default function LongTerm() {
               <Text style={styles.goalCountText}>{sectionGoals.length}</Text>
             </View>
           </View>
-          
+
           <View style={styles.cardBody}>
             <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
             <Text style={styles.cardDescription} numberOfLines={2}>{item.description}</Text>
           </View>
-          
+
           <View style={styles.cardFooter}>
             {sectionGoals.length > 0 ? (
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
-                  <View 
-                    style={[
-                      styles.progressFill, 
-                      { width: `${progressPercentage}%` }
-                    ]} 
+                  <View
+                    style={[styles.progressFill, { width: `${progressPercentage}%` }]}
                   />
                 </View>
                 <Text style={styles.progressText}>
@@ -157,14 +231,14 @@ export default function LongTerm() {
           </View>
         </View>
       </TouchableOpacity>
-    )
-  }
+    );
+  };
 
-  const renderProgressBar = ({ item }) => {
-    const sectionGoals = goals[item.id] || []
-    const completedCount = sectionGoals.filter(g => g.completed).length
-    const progressPercentage = sectionGoals.length > 0 ? (completedCount / sectionGoals.length) * 100 : 0
-    
+  const renderProgressBar = ({ item }: { item: GoalSection }) => {
+    const sectionGoals = goals[item.id] || [];
+    const completedCount = sectionGoals.filter(g => g.completed).length;
+    const progressPercentage = sectionGoals.length > 0 ? (completedCount / sectionGoals.length) * 100 : 0;
+
     return (
       <View style={styles.progressBarContainer}>
         <View style={styles.progressBarHeader}>
@@ -175,27 +249,27 @@ export default function LongTerm() {
           <Text style={styles.progressBarPercentage}>{Math.round(progressPercentage)}%</Text>
         </View>
         <View style={styles.bigProgressBar}>
-          <View 
+          <View
             style={[
-              styles.bigProgressFill, 
-              { 
+              styles.bigProgressFill,
+              {
                 width: `${progressPercentage}%`,
-                backgroundColor: item.gradient[0]
-              }
-            ]} 
+                backgroundColor: item.gradient[0],
+              },
+            ]}
           />
         </View>
         <Text style={styles.progressBarSubtext}>
           {completedCount} of {sectionGoals.length} goals completed
         </Text>
       </View>
-    )
-  }
+    );
+  };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#2c3e50" />
-      
+
       <View style={styles.header}>
         <Text style={styles.welcomeText}>Long Term Goals 🎯</Text>
         <Text style={styles.dateText}>Shape your future, one goal at a time</Text>
@@ -204,12 +278,11 @@ export default function LongTerm() {
         </Text>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollableContent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Goal Cards Grid */}
         <View style={styles.cardsContainer}>
           <FlatList
             data={goalSections}
@@ -222,22 +295,18 @@ export default function LongTerm() {
           />
         </View>
 
-        {/* Individual Progress Bars */}
         <View style={styles.progressSection}>
           <Text style={styles.progressSectionTitle}>📊 Goal Progress</Text>
-          {goalSections.map((section, index) => (
-            <View key={section.id}>
-              {renderProgressBar({ item: section })}
-            </View>
+          {goalSections.map((section) => (
+            <View key={section.id}>{renderProgressBar({ item: section })}</View>
           ))}
         </View>
 
-        {/* Overall Progress Summary */}
         <View style={styles.overallProgressSection}>
           <Text style={styles.overallProgressTitle}>🏆 Overall Progress</Text>
           <View style={styles.overallProgressContainer}>
             <View style={styles.overallProgressBar}>
-              <View 
+              <View
                 style={[styles.overallProgressFill, { width: `${overallProgress}%` }]}
               />
             </View>
@@ -255,168 +324,146 @@ export default function LongTerm() {
         <View style={styles.bottomSpacing} />
       </ScrollView>
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#2c3e50',
-    paddingTop: 40,
+    backgroundColor: '#1a1a1a',
   },
   header: {
+    paddingTop: 50,
+    paddingBottom: 20,
     paddingHorizontal: 20,
-    marginBottom: 25,
-    alignItems: 'center',
+    backgroundColor: '#2c3e50',
   },
   welcomeText: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
     color: '#ffffff',
-    marginBottom: 8,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.3)',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 4,
+    marginBottom: 5,
   },
   dateText: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#ffffff',
-    textAlign: 'center',
-    opacity: 0.9,
-    marginBottom: 5,
+    opacity: 0.8,
+    marginBottom: 10,
   },
   counterText: {
     fontSize: 14,
-    color: '#ffffff',
-    textAlign: 'center',
-    opacity: 0.8,
-    fontWeight: '500',
+    fontWeight: '600',
+    color: '#bdc3c7',
   },
   scrollableContent: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 20,
   },
   cardsContainer: {
-    marginBottom: 30,
+    marginBottom: 20,
   },
   row: {
     justifyContent: 'space-between',
-    marginBottom: 15,
+    marginBottom: 20,
   },
   cardSeparator: {
-    height: 1,
+    height: 20,
   },
   goalCard: {
     width: cardWidth,
-    height: 150,
-    borderRadius: 20,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-    marginBottom: 15,
-  },
-  cardContent: {
-    flex: 1,
-    justifyContent: 'space-between',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  sectionEmoji: {
-    fontSize: 28,
-  },
-  goalCounter: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
     borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    minWidth: 24,
-    alignItems: 'center',
-  },
-  goalCountText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  cardBody: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.2)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  cardDescription: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    lineHeight: 14,
-  },
-  cardFooter: {
-    marginTop: 10,
-  },
-  progressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  progressBar: {
-    flex: 1,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 2,
-    marginRight: 8,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#ffffff',
-    borderRadius: 2,
-  },
-  progressText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '600',
-    minWidth: 30,
-    textAlign: 'right',
-  },
-  startText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 11,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  progressSection: {
-    marginBottom: 30,
-  },
-  progressSectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  progressBarContainer: {
-    backgroundColor: '#34495e',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  cardContent: {
+    flex: 1,
+    padding: 15,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sectionEmoji: {
+    fontSize: 24,
+  },
+  goalCounter: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  goalCountText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  cardBody: {
+    flex: 1,
+    marginBottom: 10,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 5,
+  },
+  cardDescription: {
+    fontSize: 12,
+    color: '#ffffff',
+    opacity: 0.8,
+  },
+  cardFooter: {
+    alignItems: 'flex-start',
+  },
+  progressContainer: {
+    width: '100%',
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 5,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#ffffff',
+    opacity: 0.8,
+  },
+  startText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  progressSection: {
+    marginBottom: 20,
+  },
+  progressSectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 15,
+  },
+  progressBarContainer: {
+    backgroundColor: '#2d2d2d',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
   },
   progressBarHeader: {
     flexDirection: 'row',
@@ -429,7 +476,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   progressBarEmoji: {
-    fontSize: 18,
+    fontSize: 16,
     marginRight: 8,
   },
   progressBarText: {
@@ -438,60 +485,49 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   progressBarPercentage: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#4ecdc4',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   bigProgressBar: {
-    height: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 6,
-    marginBottom: 8,
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 4,
     overflow: 'hidden',
+    marginBottom: 10,
   },
   bigProgressFill: {
     height: '100%',
-    borderRadius: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    borderRadius: 4,
   },
   progressBarSubtext: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
-    textAlign: 'center',
+    color: '#bdc3c7',
   },
   overallProgressSection: {
-    backgroundColor: '#34495e',
-    borderRadius: 20,
-    padding: 20,
-    marginTop: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    backgroundColor: '#2d2d2d',
+    borderRadius: 12,
+    padding: 15,
   },
   overallProgressTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
     marginBottom: 15,
-    textAlign: 'center',
   },
   overallProgressContainer: {
-    marginBottom: 10,
+    width: '100%',
   },
   overallProgressBar: {
     height: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 5,
-    marginBottom: 12,
+    overflow: 'hidden',
+    marginBottom: 10,
   },
   overallProgressFill: {
     height: '100%',
-    backgroundColor: '#4ecdc4',
+    backgroundColor: '#27ae60',
     borderRadius: 5,
   },
   progressStats: {
@@ -500,16 +536,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   progressStatsText: {
-    color: 'rgba(255,255,255,0.9)',
     fontSize: 14,
-    fontWeight: '500',
+    color: '#bdc3c7',
   },
   progressPercentage: {
-    color: '#4ecdc4',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   bottomSpacing: {
     height: 20,
   },
-})
+});

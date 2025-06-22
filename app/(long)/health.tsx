@@ -1,74 +1,166 @@
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, Modal, TextInput, TouchableWithoutFeedback, Keyboard } from 'react-native'
-import React, { useState } from 'react'
-import { Ionicons } from '@expo/vector-icons'
-import { useRouter } from 'expo-router'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar, Modal, TextInput, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+interface Goal {
+  id: number;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+  completedAt?: Date;
+}
 
 export default function HealthGoals() {
   const router = useRouter();
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [newGoal, setNewGoal] = useState('')
-  const [goals, setGoals] = useState([
-    // Example goals - remove these in production
-    { id: 1, text: 'Exercise 30 minutes daily', completed: false, createdAt: new Date() },
-    { id: 2, text: 'Drink 8 glasses of water daily', completed: true, createdAt: new Date() },
-  ])
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newGoal, setNewGoal] = useState('');
+  const [goals, setGoals] = useState<Goal[]>([]);
 
   const sectionInfo = {
     title: 'Body & Health Goals',
     emoji: '💪',
     description: 'Physical wellness, fitness, and health targets',
-    color: '#ff6b6b'
-  }
+    color: '#e74c3c', // Aligned with LogDashboard.tsx
+  };
+
+  // Load goals from AsyncStorage
+  const loadGoals = async () => {
+    try {
+      const storedGoals = await AsyncStorage.getItem('@health_goals');
+      const healthGoals = storedGoals
+        ? JSON.parse(storedGoals).map((g: any) => ({
+            ...g,
+            createdAt: new Date(g.createdAt),
+            completedAt: g.completedAt ? new Date(g.completedAt) : undefined,
+          }))
+        : [];
+      setGoals(healthGoals);
+      console.log('HealthGoals: Loaded health goals:', healthGoals);
+
+      // Sync with @tasks for LogDashboard
+      const storedTasks = await AsyncStorage.getItem('@tasks');
+      let tasks = storedTasks ? JSON.parse(storedTasks) : [];
+      const otherTasks = tasks.filter((t: any) => t.category !== 'body&health');
+      const healthTasks = healthGoals.map((goal: Goal) => ({
+        id: goal.id,
+        mindDump: '',
+        goal: goal.text,
+        completed: goal.completed,
+        completedAt: goal.completedAt ? goal.completedAt.toISOString() : undefined,
+        category: 'body&health',
+        createdAt: goal.createdAt.toISOString(),
+      }));
+      tasks = [...otherTasks, ...healthTasks];
+      await AsyncStorage.setItem('@tasks', JSON.stringify(tasks));
+      console.log('HealthGoals: Synced tasks:', tasks);
+    } catch (error) {
+      console.error('HealthGoals: Error loading goals:', error);
+      setGoals([]);
+    }
+  };
+
+  // Save goals to AsyncStorage
+  const saveGoals = async (updatedGoals: Goal[]) => {
+    try {
+      // Save to @health_goals
+      const serializedGoals = updatedGoals.map(goal => ({
+        ...goal,
+        createdAt: goal.createdAt.toISOString(),
+        completedAt: goal.completedAt ? goal.completedAt.toISOString() : undefined,
+      }));
+      await AsyncStorage.setItem('@health_goals', JSON.stringify(serializedGoals));
+      console.log('HealthGoals: Saved health goals:', serializedGoals);
+
+      // Sync with @tasks
+      const storedTasks = await AsyncStorage.getItem('@tasks');
+      let tasks = storedTasks ? JSON.parse(storedTasks) : [];
+      const otherTasks = tasks.filter((t: any) => t.category !== 'body&health');
+      const healthTasks = updatedGoals.map(goal => ({
+        id: goal.id,
+        mindDump: '',
+        goal: goal.text,
+        completed: goal.completed,
+        completedAt: goal.completedAt ? goal.completedAt.toISOString() : undefined,
+        category: 'body&health',
+        createdAt: goal.createdAt.toISOString(),
+      }));
+      tasks = [...otherTasks, ...healthTasks];
+      await AsyncStorage.setItem('@tasks', JSON.stringify(tasks));
+      console.log('HealthGoals: Saved tasks:', tasks);
+    } catch (error) {
+      console.error('HealthGoals: Error saving goals:', error);
+    }
+  };
+
+  // Reload goals when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      loadGoals();
+    }, [])
+  );
 
   const handleAddGoal = () => {
     if (newGoal.trim()) {
-      setGoals(prev => [...prev, {
+      const newGoalObj: Goal = {
         id: Date.now(),
         text: newGoal,
         completed: false,
-        createdAt: new Date()
-      }])
-      setNewGoal('')
-      setShowAddModal(false)
+        createdAt: new Date(),
+      };
+      const updatedGoals = [...goals, newGoalObj];
+      setGoals(updatedGoals);
+      saveGoals(updatedGoals);
+      setNewGoal('');
+      setShowAddModal(false);
     }
-  }
+  };
 
-  const toggleGoalComplete = (goalId) => {
-    setGoals(prev => 
-      prev.map(goal => 
-        goal.id === goalId ? { ...goal, completed: !goal.completed } : goal
-      )
-    )
-  }
+  const toggleGoalComplete = (goalId: number) => {
+    const updatedGoals = goals.map(goal =>
+      goal.id === goalId
+        ? {
+            ...goal,
+            completed: !goal.completed,
+            completedAt: !goal.completed ? new Date() : undefined,
+          }
+        : goal
+    );
+    setGoals(updatedGoals);
+    saveGoals(updatedGoals);
+  };
 
-  const deleteGoal = (goalId) => {
-    setGoals(prev => prev.filter(goal => goal.id !== goalId))
-  }
+  const deleteGoal = (goalId: number) => {
+    const updatedGoals = goals.filter(goal => goal.id !== goalId);
+    setGoals(updatedGoals);
+    saveGoals(updatedGoals);
+  };
 
   const closeModal = () => {
-    Keyboard.dismiss()
-    setShowAddModal(false)
-    setNewGoal('')
-  }
+    Keyboard.dismiss();
+    setShowAddModal(false);
+    setNewGoal('');
+  };
 
-  const completedCount = goals.filter(g => g.completed).length
-  const progressPercentage = goals.length > 0 ? (completedCount / goals.length) * 100 : 0
+  const completedCount = goals.filter(g => g.completed).length;
+  const progressPercentage = goals.length > 0 ? (completedCount / goals.length) * 100 : 0;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={sectionInfo.color} />
-      
+
       {/* Header */}
       <View style={[styles.header, { backgroundColor: sectionInfo.color }]}>
         <View style={styles.headerTop}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
           >
             <Ionicons name="arrow-back" size={24} color="#ffffff" />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.addButton}
             onPress={() => setShowAddModal(true)}
           >
@@ -80,7 +172,7 @@ export default function HealthGoals() {
           <Text style={styles.headerEmoji}>{sectionInfo.emoji}</Text>
           <Text style={styles.headerTitle}>{sectionInfo.title}</Text>
           <Text style={styles.headerDescription}>{sectionInfo.description}</Text>
-          
+
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{goals.length}</Text>
@@ -101,7 +193,7 @@ export default function HealthGoals() {
       </View>
 
       {/* Goals List */}
-      <ScrollView 
+      <ScrollView
         style={styles.scrollableContent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -113,7 +205,7 @@ export default function HealthGoals() {
             <Text style={styles.emptyStateDescription}>
               Start your wellness journey by adding your first health goal!
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.emptyStateButton}
               onPress={() => setShowAddModal(true)}
             >
@@ -124,7 +216,7 @@ export default function HealthGoals() {
           <View style={styles.goalsList}>
             {goals.map((goal) => (
               <View key={goal.id} style={styles.goalCard}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.goalCheckbox, goal.completed && styles.goalCheckboxCompleted]}
                   onPress={() => toggleGoalComplete(goal.id)}
                 >
@@ -132,7 +224,7 @@ export default function HealthGoals() {
                     <Ionicons name="checkmark" size={16} color="#ffffff" />
                   )}
                 </TouchableOpacity>
-                
+
                 <View style={styles.goalContent}>
                   <Text style={[styles.goalText, goal.completed && styles.goalTextCompleted]}>
                     {goal.text}
@@ -141,12 +233,12 @@ export default function HealthGoals() {
                     Added {goal.createdAt.toLocaleDateString()}
                   </Text>
                 </View>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
                   style={styles.deleteGoalButton}
                   onPress={() => deleteGoal(goal.id)}
                 >
-                  <Ionicons name="trash-outline" size={18} color="#ff6b6b" />
+                  <Ionicons name="trash-outline" size={18} color="#e74c3c" />
                 </TouchableOpacity>
               </View>
             ))}
@@ -168,11 +260,11 @@ export default function HealthGoals() {
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.bottomSheet}>
                 <View style={styles.bottomSheetHandle} />
-                
+
                 <Text style={styles.modalTitle}>
                   {sectionInfo.emoji} New Health Goal
                 </Text>
-                
+
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>🎯 What health goal do you want to achieve?</Text>
                   <TextInput
@@ -190,15 +282,15 @@ export default function HealthGoals() {
                 </View>
 
                 <View style={styles.modalButtons}>
-                  <TouchableOpacity 
-                    style={styles.cancelButton} 
+                  <TouchableOpacity
+                    style={styles.cancelButton}
                     onPress={closeModal}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.saveButton, { backgroundColor: sectionInfo.color }]} 
+
+                  <TouchableOpacity
+                    style={[styles.saveButton, { backgroundColor: sectionInfo.color }]}
                     onPress={handleAddGoal}
                   >
                     <Text style={styles.saveButtonText}>💪 Add Goal</Text>
@@ -210,17 +302,17 @@ export default function HealthGoals() {
         </TouchableWithoutFeedback>
       </Modal>
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#1a1a1a',
   },
   header: {
-    paddingTop: 40,
-    paddingBottom: 30,
+    paddingTop: 50,
+    paddingBottom: 20,
     paddingHorizontal: 20,
   },
   headerTop: {
@@ -239,32 +331,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerEmoji: {
-    fontSize: 48,
+    fontSize: 40,
     marginBottom: 10,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#ffffff',
-    marginBottom: 8,
-    textAlign: 'center',
+    marginBottom: 5,
   },
   headerDescription: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.9)',
-    textAlign: 'center',
+    fontSize: 14,
+    color: '#ffffff',
+    opacity: 0.8,
     marginBottom: 20,
+    textAlign: 'center',
   },
   statsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 15,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
     padding: 15,
-    alignItems: 'center',
+    width: '100%',
   },
   statItem: {
-    flex: 1,
     alignItems: 'center',
+    flex: 1,
   },
   statNumber: {
     fontSize: 20,
@@ -273,68 +366,70 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
+    color: '#ffffff',
+    opacity: 0.7,
   },
   statDivider: {
     width: 1,
-    height: 30,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    marginHorizontal: 15,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: '100%',
+    marginHorizontal: 10,
   },
   scrollableContent: {
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 50,
+    justifyContent: 'center',
+    marginTop: 50,
   },
   emptyStateEmoji: {
-    fontSize: 64,
-    marginBottom: 20,
+    fontSize: 50,
+    marginBottom: 10,
   },
   emptyStateTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#2c3e50',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ffffff',
     marginBottom: 10,
   },
   emptyStateDescription: {
-    fontSize: 16,
-    color: '#7f8c8d',
+    fontSize: 14,
+    color: '#bdc3c7',
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 30,
+    marginBottom: 20,
     paddingHorizontal: 20,
   },
   emptyStateButton: {
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#e74c3c',
+    borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+    paddingHorizontal: 20,
   },
   emptyStateButtonText: {
-    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+    color: '#ffffff',
   },
   goalsList: {
-    gap: 15,
+    marginTop: 10,
   },
   goalCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 15,
-    padding: 15,
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#2d2d2d',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   goalCheckbox: {
     width: 24,
@@ -342,37 +437,33 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: '#bdc3c7',
-    marginRight: 15,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 15,
   },
   goalCheckboxCompleted: {
-    backgroundColor: '#27ae60',
-    borderColor: '#27ae60',
+    backgroundColor: '#e74c3c',
+    borderColor: '#e74c3c',
   },
   goalContent: {
     flex: 1,
   },
   goalText: {
     fontSize: 16,
-    color: '#2c3e50',
-    lineHeight: 22,
-    marginBottom: 4,
+    fontWeight: '500',
+    color: '#ffffff',
   },
   goalTextCompleted: {
     textDecorationLine: 'line-through',
-    color: '#95a5a6',
+    color: '#bdc3c7',
   },
   goalDate: {
     fontSize: 12,
-    color: '#95a5a6',
+    color: '#bdc3c7',
+    marginTop: 4,
   },
   deleteGoalButton: {
     padding: 8,
-    marginLeft: 10,
-  },
-  bottomSpacing: {
-    height: 20,
   },
   modalOverlay: {
     flex: 1,
@@ -380,13 +471,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   bottomSheet: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    paddingHorizontal: 25,
-    paddingTop: 20,
-    paddingBottom: 40,
-    minHeight: '50%',
+    backgroundColor: '#2d2d2d',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    maxHeight: '80%',
   },
   bottomSheetHandle: {
     width: 40,
@@ -394,62 +485,62 @@ const styles = StyleSheet.create({
     backgroundColor: '#bdc3c7',
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 20,
+    marginVertical: 10,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#ff6b6b',
+    color: '#ffffff',
+    marginBottom: 20,
     textAlign: 'center',
-    marginBottom: 25,
   },
   section: {
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#2c3e50',
+    color: '#ffffff',
     marginBottom: 10,
   },
   textInput: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#3a3a3a',
     borderRadius: 12,
-    padding: 16,
+    padding: 15,
+    color: '#ffffff',
     fontSize: 16,
-    color: '#2c3e50',
-    minHeight: 80,
-    borderWidth: 2,
-    borderColor: '#ecf0f1',
+    minHeight: 100,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 20,
+    marginTop: 10,
   },
   cancelButton: {
-    backgroundColor: '#ecf0f1',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    flex: 0.45,
+    flex: 1,
+    backgroundColor: '#3a3a3a',
+    borderRadius: 12,
+    padding: 15,
+    alignItems: 'center',
+    marginRight: 10,
   },
   cancelButtonText: {
-    color: '#7f8c8d',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
+    color: '#ffffff',
   },
   saveButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    flex: 0.45,
+    flex: 1,
+    borderRadius: 12,
+    padding: 15,
+    alignItems: 'center',
   },
   saveButtonText: {
-    color: '#ffffff',
     fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: '600',
+    color: '#ffffff',
   },
-})
+  bottomSpacing: {
+    height: 20,
+  },
+});
