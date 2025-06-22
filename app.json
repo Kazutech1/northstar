@@ -11,14 +11,15 @@
     "ios": {
       "supportsTablet": true
     },
-"android": {
-  "adaptiveIcon": {
-    "foregroundImage": "./assets/images/adaptive-icon.png",
-    "backgroundColor": "#ffffff",
-    "monochromeImage": "./assets/images/adaptive-icon-mono.png"
-  },
-  "edgeToEdgeEnabled": true
-},
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.kazuto112.northstar"
+    },
     "web": {
       "bundler": "metro",
       "output": "static",
@@ -38,6 +39,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "21a7a4d2-cb98-410e-a6a9-144731e1d86c"
+      }
     }
   }
 }
